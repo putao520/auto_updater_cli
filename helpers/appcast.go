@@ -1,8 +1,8 @@
 package helpers
 
 import (
-	"encoding/xml"
 	"fmt"
+	"github.com/putao520/gscXml"
 	"log"
 	"os"
 )
@@ -31,8 +31,8 @@ func writeXml(path string, content []byte) error {
 	return os.WriteFile(path, content, 0644)
 }
 
-func getAppCast(rootDir string) (map[string]interface{}, bool, error) {
-	appCastXml := "./" + rootDir + "/appcast.xml"
+func getAppCast(rootDir string) (*gscXml.XmlDocument, bool, error) {
+	appCastXml := "./" + rootDir + "appcast.xml"
 	_, err := os.Stat(appCastXml)
 	isCreated := false
 
@@ -51,64 +51,92 @@ func getAppCast(rootDir string) (map[string]interface{}, bool, error) {
 	}
 
 	// 使用 map 动态解析
-	var result map[string]interface{}
-	err = xml.Unmarshal(data, &result)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return result, isCreated, nil
+	doc := gscXml.NewXmlDocument(string(data))
+	return &doc, isCreated, nil
 }
 
-func buildAppCastItem(dsaSignature string, spec map[string]any, pack map[string]any) map[string]any {
-	var info map[string]any
+func buildAppCastItem(dsaSignature string, spec map[string]any, pack map[string]any) []*gscXml.XmlNode {
+	d := make(map[gscXml.XmlName][]*gscXml.XmlNode)
+
 	version, _ := spec["version"].(string)
 	platform, _ := pack["platform"].(string)
-	name, _ := spec["name"].(string)
-	target, _ := pack["target"].(string)
-	info["title"] = "Version " + version
-	info["pubDate"] = GeneratePubDate()
-	url := fmt.Sprintf("%s-%s-%s.%s", name, version, platform, target)
-	var enclosure map[string]any
-	enclosure["url"] = url
-	enclosure["sparkle:dsaSignature"] = dsaSignature
-	enclosure["sparkle:version"] = version
-	enclosure["sparkle:os"] = platform
-	enclosure["length"] = 0
-	enclosure["type"] = "application/octet-stream"
-	info["enclosure"] = enclosure
-	return info
+	fileName := BuildBaseFileName(spec, pack)
+
+	d[gscXml.Name("title", "")] = []*gscXml.XmlNode{
+		{
+			Val:  "Version " + version,
+			Attr: nil,
+		},
+	}
+	d[gscXml.Name("pubDate", "")] = []*gscXml.XmlNode{
+		{
+			Val:  GeneratePubDate(),
+			Attr: nil,
+		},
+	}
+	d[gscXml.Name("enclosure", "")] = []*gscXml.XmlNode{
+		{
+			Val: "",
+			Attr: []gscXml.XmlAttr{
+				{
+					Name:  gscXml.Name("url", ""),
+					Value: fmt.Sprintf("%s/%s", version, fileName),
+				},
+				{
+					Name:  gscXml.Name("dsaSignature", "sparkle"),
+					Value: dsaSignature,
+				},
+				{
+					Name:  gscXml.Name("version", "sparkle"),
+					Value: version,
+				},
+				{
+					Name:  gscXml.Name("os", "sparkle"),
+					Value: platform,
+				},
+				{
+					Name:  gscXml.Name("length", ""),
+					Value: "0",
+				},
+				{
+					Name:  gscXml.Name("type", ""),
+					Value: "application/octet-stream",
+				},
+			},
+		},
+	}
+
+	return []*gscXml.XmlNode{
+		{
+			Val:  d,
+			Attr: nil,
+		},
+	}
 }
 
-func GenerateAppCast(rootDir string, dsaSignature string, spec map[string]interface{}, pack map[string]interface{}) {
-	result, isCreated, err := getAppCast(rootDir)
+func GenerateAppCast(rootDir string, dsaSignature string, spec map[string]interface{}, pack map[string]interface{}) string {
+	doc, isCreated, err := getAppCast(rootDir)
 	if err != nil {
 		log.Fatal(err)
-		return
+		return ""
 	}
 	// 初始化
-	channel, _ := result["rss"].(map[string]interface{})["channel"].(map[string]interface{})
+	rss := gscXml.GetNode(doc.Body, gscXml.Name("rss", "")).Val.(map[gscXml.XmlName][]*gscXml.XmlNode)
+	channel := gscXml.GetNode(rss, gscXml.Name("channel", "")).Val.(map[gscXml.XmlName][]*gscXml.XmlNode)
 	if isCreated {
-		channel["title"] = spec["name"]
-		channel["description"] = spec["description"]
+		gscXml.GetNode(channel, gscXml.Name("title", "")).Val = spec["name"]
+		gscXml.GetNode(channel, gscXml.Name("description", "")).Val = spec["description"]
 	}
-
 	// 构造 item
-	var items []map[string]interface{}
-	item := buildAppCastItem(dsaSignature, spec, pack)
-	channel["item"] = append(items, item)
-
+	items := buildAppCastItem(dsaSignature, spec, pack)
+	channel[gscXml.Name("item", "")] = items
 	// 输出 xml
-	xmlData, err := xml.MarshalIndent(result, "", "  ")
-	if err != nil {
-		log.Fatalf("Error marshaling to XML: %v", err)
-		return
-	}
-
+	xmlData := doc.String()
 	appCastXml := "./" + rootDir + "/appcast.xml"
-	err = writeXml(appCastXml, xmlData)
+	err = writeXml(appCastXml, []byte(xmlData))
 	if err != nil {
 		log.Fatalf("Error marshaling to XML: %v", err)
-		return
+		return ""
 	}
+	return appCastXml
 }

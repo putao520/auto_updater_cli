@@ -42,6 +42,8 @@ func signUpdate(args []string) (SignUpdateResult, error) {
 	signUpdateOutput := strings.Join(outputs, "")
 	if runtime.GOOS == "windows" {
 		signUpdateOutput = strings.TrimSpace(strings.ReplaceAll(signUpdateOutput, "\r\n", ""))
+		signUpdateOutput = strings.TrimSpace(strings.ReplaceAll(signUpdateOutput, "\r", ""))
+		signUpdateOutput = strings.TrimSpace(strings.ReplaceAll(signUpdateOutput, "\n", ""))
 		signUpdateOutput = fmt.Sprintf(`sparkle:dsaSignature="%s" length="0"`, signUpdateOutput)
 	}
 
@@ -76,4 +78,17 @@ func DoSignUpdate(args []string) {
 
 	// Output the result (you can use result as needed)
 	fmt.Printf("Signature: %s, Length: %d\n", result.Signature, result.Length)
+}
+
+func BuildSignArg(platform string, releaseName string, jobName string) []string {
+	pubspec, _ := helpers.GetPubSpecYaml()
+	distributeOptions, _ := helpers.GetDistributeOptions()
+	outputDir, _ := distributeOptions["output"].(string)
+	packInfo := helpers.GetReleaseItemInfo(distributeOptions, releaseName, jobName, "package")
+	version, _ := pubspec["version"].(string)
+	name, _ := pubspec["name"].(string)
+	target, _ := packInfo["target"].(string)
+	signatureFile := fmt.Sprintf("%s%s/%s-%s-%s.%s", outputDir, version, name, version, platform, target)
+	var args []string
+	return append(args, signatureFile)
 }
